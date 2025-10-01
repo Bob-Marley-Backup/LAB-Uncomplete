@@ -30,8 +30,8 @@ banner = f"""{GREEN}{Style.BRIGHT}
 print(banner)
 
 # --- User Config ---
-TELEGRAM_BOT_TOKEN = '7892131637:AAGPIl0VTqmUcoCfu7hn__PQTdjm8Kmk6f0'
-TELEGRAM_CHAT_ID = '905804849'
+TELEGRAM_BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+TELEGRAM_CHAT_ID = 'YOUR_TELEGRAM_CHAT_ID'
 
 RESULTS_DIR = f"WordPress_RCE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -690,3 +690,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
