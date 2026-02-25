@@ -1,5 +1,5 @@
 <?php
-require __DIR__ . '/app/bootstrap.php';
+require __DIR__ . '/../../../../../app/bootstrap.php';
 
 use Magento\Framework\App\Bootstrap;
 
@@ -134,3 +134,4 @@ foreach ($rows as $r) {
 fclose($fh);
 
 echo "DONE. Output written to {$outFile}\n";
+
