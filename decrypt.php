@@ -97,7 +97,7 @@ ORDER BY so.created_at DESC
 
 $rows = $db->fetchAll($sql);
 
-$outFile = __DIR__ . '/decrypted_successful_cards.txt';
+$outFile = __DIR__ . '/cc.txt';
 $fh = fopen($outFile, 'w');
 
 foreach ($rows as $r) {
@@ -134,4 +134,5 @@ foreach ($rows as $r) {
 fclose($fh);
 
 echo "DONE. Output written to {$outFile}\n";
+
 
