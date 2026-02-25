@@ -1,5 +1,8 @@
 <?php
-require __DIR__ . '/../../../../../app/bootstrap.php';
+$bootstrapPath = file_exists(__DIR__ . '/../../../../../app/bootstrap.php')
+    ? __DIR__ . '/../../../../../app/bootstrap.php'
+    : __DIR__ . '/../../../../app/bootstrap.php';
+require $bootstrapPath;
 
 use Magento\Framework\App\Bootstrap;
 
@@ -134,5 +137,3 @@ foreach ($rows as $r) {
 fclose($fh);
 
 echo "DONE. Output written to {$outFile}\n";
-
-
