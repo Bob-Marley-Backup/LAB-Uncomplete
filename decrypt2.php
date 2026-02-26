@@ -450,7 +450,10 @@ echo "DONE. Found $found_count valid records. Saved to $outFile\n";
 // BATCH AUTO-RELOAD (Browser)
 // ============================================
 $next_offset = $current_offset + $batch_size;
-if ($row_count > 0) {
+
+// If we fetched fewer rows than batch_size, we are done.
+// If we fetched exactly batch_size, there might be more.
+if ($row_count == $batch_size) {
     echo "<div>Batch Complete. Found $found_count records. <a href='?batch={$next_offset}'>Next Batch...</a></div>";
     echo "<script>setTimeout(function(){ window.location.href = '?batch={$next_offset}'; }, 2000);</script>";
 } else {
@@ -458,7 +461,7 @@ if ($row_count > 0) {
     if ($tg_bot_token !== 'ENTER_BOT_TOKEN_HERE') {
         // Send final file
         send_telegram(null, $outFile);
-        send_telegram("✅ <b>Scan Finished</b>\nTotal Checked: " . $current_offset);
+        send_telegram("✅ <b>Scan Finished</b>\nFile: " . basename($outFile));
     }
 }
 ?>
