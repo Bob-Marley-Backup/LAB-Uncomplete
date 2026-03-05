@@ -342,15 +342,16 @@ $results = [];
 
 // Dynamic search queries for maximum precision
 $search_queries = [
-    // Stripe Keys
+    // Stripe Keys (live AND test)
     "SELECT path, value, 'Stripe' as category FROM " . $prefix . "core_config_data 
      WHERE path LIKE '%stripe%' 
-        OR path LIKE '%sk_live%' 
-        OR path LIKE '%pk_live%' 
+        OR path LIKE '%sk_%' 
+        OR path LIKE '%pk_%' 
         OR value LIKE 'sk_live_%' 
         OR value LIKE 'pk_live_%'
         OR value LIKE 'sk_test_%' 
-        OR value LIKE 'pk_test_%'",
+        OR value LIKE 'pk_test_%'
+        OR (path LIKE '%payment%' AND (value LIKE 'live' OR value LIKE 'test'))",
     
     // AWS SES / SMTP (more specific)
     "SELECT path, value, 'AWS_SES' as category FROM " . $prefix . "core_config_data 
@@ -484,13 +485,32 @@ foreach ($results as $r) {
 if (!empty($stripe_keys)) {
     $output .= "[STRIPE KEYS]\n";
     $output .= str_repeat("-", 60) . "\n";
+    
+    $has_live = false;
+    $has_test = false;
+    
     foreach ($stripe_keys as $r) {
         $val = $r['decrypted'];
-        // Only show if it's a valid looking value
+        // Check if it's a valid Stripe value
         if (strlen($val) > 3 && (strpos($val, 'sk_') === 0 || strpos($val, 'pk_') === 0 || in_array($val, ['test', 'live']))) {
             $output .= sprintf("%-20s: %s\n", $r['label'], $val);
+            
+            // Track live vs test
+            if (strpos($val, 'live') !== false || strpos($val, 'sk_live_') === 0 || strpos($val, 'pk_live_') === 0) {
+                $has_live = true;
+            }
+            if (strpos($val, 'test') !== false || strpos($val, 'sk_test_') === 0 || strpos($val, 'pk_test_') === 0) {
+                $has_test = true;
+            }
         }
     }
+    
+    // Add note if only test keys found
+    if ($has_test && !$has_live) {
+        $output .= "\n";
+        $output .= "Note: Only TEST mode keys found (no live production keys)\n";
+    }
+    
     $output .= "\n";
 }
 
