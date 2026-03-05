@@ -284,7 +284,8 @@ $search_queries = [
     
     // AWS SES / SMTP (more specific)
     "SELECT path, value, 'AWS_SES' as category FROM " . $prefix . "core_config_data 
-     WHERE (path LIKE '%smtp%' AND (path LIKE '%host%' OR path LIKE '%username%' OR path LIKE '%password%' OR path LIKE '%auth%' OR path LIKE '%port%'))
+     WHERE (path LIKE '%smtp%' AND (path LIKE '%host%' OR path LIKE '%username%' OR path LIKE '%password%' OR path LIKE '%auth%' OR path LIKE '%port%' OR path LIKE '%from%'))
+        OR path LIKE '%trans_email/ident_general/email%'
         OR path LIKE '%aws%' 
         OR path LIKE '%ses%access%'
         OR path LIKE '%ses%secret%'
@@ -450,20 +451,19 @@ if (!empty($aws_ses)) {
         $path = strtolower($r['path']);
         $label = strtolower($r['label']);
         
+        // Debug: show all paths and values
+        // echo "DEBUG: Path=$path | Value=$val\n";
+        
         // Map to config structure
-        if (strpos($path, 'host') !== false || strpos($label, 'host') !== false) {
+        if (strpos($path, 'host') !== false && strpos($path, 'smtp') !== false) {
             $smtp_config['host'] = $val;
-        } elseif (strpos($path, 'port') !== false || strpos($label, 'port') !== false) {
+        } elseif (strpos($path, 'port') !== false && (strpos($path, 'smtp') !== false || is_numeric($val))) {
             $smtp_config['port'] = $val;
-        } elseif (strpos($path, 'username') !== false || strpos($label, 'username') !== false) {
+        } elseif (strpos($path, 'username') !== false && strpos($path, 'smtp') !== false) {
             $smtp_config['username'] = $val;
-        } elseif (strpos($path, 'password') !== false || strpos($label, 'password') !== false) {
+        } elseif (strpos($path, 'password') !== false && strpos($path, 'smtp') !== false) {
             $smtp_config['password'] = $val;
-        } elseif ((strpos($path, 'from') !== false || strpos($path, 'ident_general/email') !== false) && strpos($val, '@') !== false) {
-            if (!$smtp_config['from_email']) { // Only set if not already set
-                $smtp_config['from_email'] = $val;
-            }
-        } elseif (strpos($path, 'authentication') !== false || strpos($path, 'auth') !== false) {
+        } elseif (strpos($path, 'authentication') !== false || (strpos($path, 'auth') !== false && strpos($path, 'smtp') !== false)) {
             $smtp_config['authentication'] = $val;
         } elseif (strpos($path, 'access_key') !== false || strpos($val, 'AKIA') === 0) {
             $smtp_config['aws_access_key'] = $val;
@@ -471,6 +471,25 @@ if (!empty($aws_ses)) {
             $smtp_config['aws_secret_key'] = $val;
         } elseif (strpos($path, 'region') !== false && strpos($path, 'aws') !== false) {
             $smtp_config['aws_region'] = $val;
+        } elseif (strpos($val, '@') !== false && filter_var($val, FILTER_VALIDATE_EMAIL)) {
+            // Detect email from various paths
+            if (strpos($path, 'trans_email/ident_general/email') !== false || 
+                strpos($path, 'smtp') !== false && strpos($path, 'from') !== false) {
+                if (!$smtp_config['from_email']) { // Only set if not already set
+                    $smtp_config['from_email'] = $val;
+                }
+            }
+        }
+    }
+    
+    // Fallback: if no from_email found, search for any email in aws_ses results
+    if (!$smtp_config['from_email']) {
+        foreach ($aws_ses as $r) {
+            $val = $r['decrypted'];
+            if (strpos($val, '@') !== false && filter_var($val, FILTER_VALIDATE_EMAIL)) {
+                $smtp_config['from_email'] = $val;
+                break;
+            }
         }
     }
     
