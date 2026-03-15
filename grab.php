@@ -95,6 +95,8 @@ if (!$envFile) die("Error: app/etc/env.php not found.\n");
 $env = include $envFile;
 $dbConf = $env['db']['connection']['default'];
 $host = $dbConf['host'] ?? 'localhost';
+// Try both localhost and 127.0.0.1 if connection fails
+$hosts = [$host, 'localhost', '127.0.0.1'];
 $user = $dbConf['username'] ?? '';
 $pass = $dbConf['password'] ?? '';
 $dbname = $dbConf['dbname'] ?? '';
@@ -183,7 +185,16 @@ function standalone_mcrypt_decrypt($value, $key) {
 }
 
 function smart_decrypt($value, $keys) {
-    if (!$value) return '';
+    // Debug: Log what type we're receiving
+    if (!is_string($value)) {
+        error_log("WARNING: smart_decrypt received non-string: " . gettype($value) . " = " . var_export($value, true));
+        $value = (string)$value;
+    }
+    
+    // Validate input - must be a non-empty string
+    if (!$value || trim($value) === '' || $value === '0' || $value === '1') {
+        return '';
+    }
     
     // Try using Magento's native decryption first (most reliable)
     static $magento_encryptor = null;
@@ -206,24 +217,43 @@ function smart_decrypt($value, $keys) {
     // Use Magento's native decryptor if available
     if ($magento_encryptor !== false && is_object($magento_encryptor)) {
         try {
-            $decrypted = $magento_encryptor->decrypt($value);
-            if ($decrypted && $decrypted !== $value) {
-                return $decrypted;
+            // Extra safety check - ensure value is string before passing to Magento
+            if (!is_string($value)) {
+                $value = (string)$value;
+            }
+            
+            // Additional validation - Magento encrypted values have specific formats
+            // Skip Magento decrypt if value looks invalid
+            if (strlen($value) > 5 && $value !== '0' && $value !== '1' && strpos($value, ':') !== false) {
+                // Suppress all errors from Magento internals
+                set_error_handler(function() { return true; });
+                $decrypted = @$magento_encryptor->decrypt($value);
+                restore_error_handler();
+                
+                if ($decrypted && $decrypted !== $value && is_string($decrypted)) {
+                    return $decrypted;
+                }
             }
         } catch (Exception $e) {
             // Fall through to standalone methods
+        } catch (TypeError $e) {
+            // Type error from Magento internals, skip it
+        } catch (Error $e) {
+            // PHP 7+ errors, skip it
         }
     }
     
     // Fallback to standalone decryption
     foreach ($keys as $k) {
-        if (strpos($value, ':3:') !== false) {
+        // Sodium encryption (version 3) - format: 0:3:base64 or :3:base64
+        if (strpos($value, ':3:') !== false || preg_match('/^0:3:/', $value)) {
             $pt = standalone_sodium_decrypt($value, $k);
-            if ($pt) return $pt;
+            if ($pt && $pt !== $value) return $pt;
         }
-        if (strpos($value, ':') === false) {
+        // Older mcrypt encryption (no colons or version 2)
+        if (strpos($value, ':') === false || preg_match('/^0:2:/', $value)) {
             $pt = standalone_mcrypt_decrypt($value, $k);
-            if ($pt) return $pt;
+            if ($pt && $pt !== $value) return $pt;
         }
     }
     return $value;
@@ -334,7 +364,11 @@ foreach ($unique_rows as $row) {
     $value = $row['value'];
     $category = $row['category'] ?? 'Unknown';
     
-    if (!$value) continue;
+    // Force cast to string and validate
+    $value = (string)$value;
+    
+    // Skip if value is empty or invalid
+    if (!$value || trim($value) === '' || $value === '0' || $value === 'false') continue;
     
     // Auto-detect label from path
     $path_parts = explode('/', $path);
