@@ -6,7 +6,7 @@
 
 // ============= CONFIGURATION (EDIT HERE) =============
 $CONFIG = array(
-    'host' => '31.57.184.148',  // Your IP here
+    'host' => '152.89.168.215',  // Your IP here
     'port' => 15,                 // Your port here
     'timeout' => 30,
     'buffer' => 1400,
