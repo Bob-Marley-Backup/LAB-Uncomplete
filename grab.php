@@ -313,16 +313,27 @@ $search_queries = [
         OR value LIKE 'pk_test_%'",
     
     // AWS SES / SMTP (more specific)
-    "SELECT path, value, 'AWS_SES' as category FROM " . $prefix . "core_config_data 
+    "SELECT path, value, 'AWS_SES' as category FROM " . $prefix . "core_config_data
      WHERE (path LIKE '%smtp%' AND (path LIKE '%host%' OR path LIKE '%username%' OR path LIKE '%password%' OR path LIKE '%auth%' OR path LIKE '%port%' OR path LIKE '%from%'))
         OR path LIKE '%trans_email/ident_general/email%'
-        OR path LIKE '%aws%' 
+        OR path LIKE '%aws%'
+        OR path LIKE '%amazon%'
+        OR path LIKE '%amazonses%'
+        OR path LIKE '%amazon_ses%'
         OR path LIKE '%ses%access%'
         OR path LIKE '%ses%secret%'
         OR path LIKE '%ses%region%'
         OR value LIKE 'AKIA%'
+        OR value LIKE 'ASIA%'
         OR value LIKE '%smtp.%'
-        OR value LIKE '%mail.%'",
+        OR value LIKE '%mail.%'
+        OR value LIKE '%amazonaws.com%'
+        OR value LIKE '%email-smtp%'",
+
+    // Generic AKIA/ASIA scan - catch ALL AWS keys anywhere in database
+    "SELECT path, value, 'AWS_KEYS' as category FROM " . $prefix . "core_config_data
+     WHERE value REGEXP '^(AKIA|ASIA)[A-Z0-9]{16}$'
+        OR value REGEXP '(AKIA|ASIA)[A-Z0-9]{16}'",
     
     // Postmark
     "SELECT path, value, 'Postmark' as category FROM " . $prefix . "core_config_data 
