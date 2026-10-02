@@ -24,8 +24,8 @@ define('BOT_VERSION', '1.0');
 // ============================================
 $lock_file = '/tmp/.irc_bot_' . md5($_SERVER['HTTP_HOST'] ?? gethostname()) . '.lock';
 
-// Check if bot already running for this domain
-if (file_exists($lock_file)) {
+// Check if bot already running for this domain (only if posix_kill available)
+if (file_exists($lock_file) && function_exists('posix_kill')) {
     $pid = @file_get_contents($lock_file);
     if ($pid && posix_kill((int)$pid, 0)) {
         // Bot already running, exit silently
@@ -338,6 +338,34 @@ function ircBot() {
 // ============================================
 // START BOT
 // ============================================
+
+// Daemonize if running from CLI (prevent death on CTRL+C)
+if (php_sapi_name() === 'cli') {
+    // Ignore user abort and SIGHUP
+    ignore_user_abort(true);
+    if (function_exists('pcntl_signal')) {
+        pcntl_signal(SIGHUP, SIG_IGN);
+    }
+    
+    // Try to fork into background (if pcntl available)
+    if (function_exists('pcntl_fork')) {
+        $pid = pcntl_fork();
+        if ($pid === -1) {
+            // Fork failed, continue in foreground
+        } elseif ($pid) {
+            // Parent process - exit and let child run
+            echo "✓ Bot forked to background (PID: $pid)\n";
+            exit(0);
+        }
+        // Child process continues...
+        
+        // Become session leader
+        if (function_exists('posix_setsid')) {
+            posix_setsid();
+        }
+    }
+}
+
 // Print success message immediately
 echo "✓ IRC Bot Starting...\n";
 echo "  Server: " . IRC_SERVER . ":" . IRC_PORT . "\n";
