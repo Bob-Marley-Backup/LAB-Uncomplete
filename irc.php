@@ -248,6 +248,12 @@ function ircBot() {
             continue;
         }
         
+        // Debug: Log all PRIVMSG to see what we're receiving (optional, remove in production)
+        if (stripos($data, 'PRIVMSG') !== false && stripos($data, IRC_CHANNEL) !== false) {
+            $log = "/tmp/.irc_debug_" . md5($_SERVER['HTTP_HOST'] ?? gethostname()) . ".log";
+            @file_put_contents($log, date('[Y-m-d H:i:s] ') . $data . "\n", FILE_APPEND);
+        }
+        
         // Handle commands in channel
         // Format: !cmd@bot_name command
         // Format: !cmd@all command
